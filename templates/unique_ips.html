@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Unique IPs — NetScaler Honeypot{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel-header">
+    <span>Unique Attacker IPs</span>
+    <span id="ip-count" class="muted">loading…</span>
+  </div>
+  <div class="panel-body" style="padding:0">
+    <table class="tbl" id="ip-table">
+      <thead>
+        <tr>
+          <th style="width:50px">#</th>
+          <th>IP Address</th>
+        </tr>
+      </thead>
+      <tbody id="ip-tbody">
+        <tr><td colspan="2" class="muted" style="padding:16px 10px">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function countryFlag(code) {
+  if (!code || code.length !== 2) return '';
+  return code.toUpperCase().replace(/[A-Z]/g, c =>
+    String.fromCodePoint(c.charCodeAt(0) + 127397)
+  );
+}
+
+fetch('/api/unique-ips')
+  .then(r => r.json())
+  .then(data => {
+    document.getElementById('ip-count').textContent = data.total + ' unique IPs';
+    const tbody = document.getElementById('ip-tbody');
+    if (!data.ips.length) {
+      tbody.innerHTML = '<tr><td colspan="2" class="muted" style="padding:16px 10px">No events recorded yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.ips.map((entry, i) => {
+      const flag = countryFlag(entry.country);
+      const prefix = flag ? `<span style="margin-right:6px;font-size:15px">${flag}</span>` : '';
+      return `<tr>
+        <td class="muted">${i + 1}</td>
+        <td>${prefix}<a href="https://www.abuseipdb.com/check/${entry.ip}" target="_blank" rel="noopener noreferrer"
+            style="color:var(--accent);text-decoration:none">${entry.ip}</a></td>
+      </tr>`;
+    }).join('');
+  })
+  .catch(() => {
+    document.getElementById('ip-tbody').innerHTML =
+      '<tr><td colspan="2" class="muted" style="padding:16px 10px">Failed to load IPs.</td></tr>';
+  });
+</script>
+{% endblock %}

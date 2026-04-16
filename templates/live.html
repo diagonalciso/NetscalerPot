@@ -1,0 +1,290 @@
+{% extends "base.html" %}
+{% block title %}Live Feed — NetScaler Honeypot{% endblock %}
+
+{% block head %}
+<style>
+.live-header {
+  display: flex; align-items: center; gap: 14px; margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.live-indicator {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--low);
+}
+.live-dot {
+  width: 8px; height: 8px; background: var(--low);
+  border-radius: 50%; animation: pulse 1s infinite;
+}
+.live-dot.disconnected { background: var(--critical); animation: none; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+.filter-bar {
+  display: flex; gap: 8px; flex-wrap: wrap;
+}
+.filter-btn {
+  padding: 4px 12px; border-radius: 12px; border: 1px solid var(--border);
+  background: var(--bg3); color: var(--muted); cursor: pointer;
+  font: inherit; font-size: 11px; transition: all 0.15s;
+}
+.filter-btn:hover  { border-color: var(--accent); color: var(--text); }
+.filter-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(88,166,255,0.08); }
+.filter-btn.critical.active { border-color:var(--critical); color:var(--critical); background:rgba(255,68,68,0.08); }
+.filter-btn.high.active     { border-color:var(--high);     color:var(--high);     background:rgba(227,160,8,0.08); }
+.filter-btn.cred.active     { border-color:#bc8cff;         color:#bc8cff;         background:rgba(188,140,255,0.08); }
+
+.spacer { flex: 1; }
+.ctrl-btn {
+  padding: 4px 12px; border-radius: 4px; border: 1px solid var(--border);
+  background: var(--bg3); color: var(--muted); cursor: pointer;
+  font: inherit; font-size: 11px;
+}
+.ctrl-btn:hover { color: var(--text); }
+
+/* Feed */
+#feed-wrap {
+  background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+  height: calc(100vh - 220px); min-height: 400px;
+  overflow-y: auto; padding: 6px 0;
+  font-size: 12px;
+}
+.feed-row {
+  display: flex; gap: 0; align-items: baseline;
+  padding: 5px 16px; border-bottom: 1px solid rgba(48,54,61,0.5);
+  animation: fadeIn 0.3s ease;
+  cursor: pointer;
+}
+.feed-row:hover { background: var(--bg3); }
+@keyframes fadeIn { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
+
+.feed-ts   { color: var(--muted); white-space: nowrap; min-width: 145px; }
+.feed-ip   { min-width: 130px; color: var(--text); }
+.feed-type { min-width: 200px; }
+.feed-alrt { min-width: 80px; }
+.feed-cve  { min-width: 140px; }
+.feed-path { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.feed-cred { color: var(--high); font-weight: 700; white-space: nowrap; margin-left: 10px; }
+
+/* Alert color flash */
+.feed-row.CRITICAL { border-left: 3px solid var(--critical); }
+.feed-row.HIGH     { border-left: 3px solid var(--high); }
+.feed-row.LOW      { border-left: 3px solid #2d4a2e; }
+
+/* Detail panel */
+#detail-panel {
+  position: fixed; right: 0; top: 50px; bottom: 0; width: 400px;
+  background: var(--bg2); border-left: 1px solid var(--border);
+  padding: 16px; overflow-y: auto;
+  transform: translateX(100%); transition: transform 0.2s ease;
+  z-index: 200;
+}
+#detail-panel.open { transform: none; }
+#detail-panel pre { white-space: pre-wrap; word-break: break-all; font-size: 11px; color: var(--muted); }
+#detail-close {
+  position: absolute; top: 12px; right: 14px;
+  cursor: pointer; color: var(--muted); font-size: 18px; line-height: 1;
+}
+#detail-close:hover { color: var(--text); }
+
+.stats-bar {
+  display: flex; gap: 20px; flex-wrap: wrap;
+  padding: 10px 0; font-size: 11px; color: var(--muted);
+}
+.stats-bar span { color: var(--text); font-weight: 700; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="live-header">
+  <div class="live-indicator">
+    <div class="live-dot" id="live-dot"></div>
+    <span id="live-status">CONNECTING…</span>
+  </div>
+
+  <div class="filter-bar">
+    <button class="filter-btn active" data-filter="ALL"      onclick="setFilter(this,'ALL')">All</button>
+    <button class="filter-btn critical" data-filter="CRITICAL" onclick="setFilter(this,'CRITICAL')">Critical</button>
+    <button class="filter-btn high"     data-filter="HIGH"     onclick="setFilter(this,'HIGH')">High</button>
+    <button class="filter-btn cred"     data-filter="CRED"     onclick="setFilter(this,'CRED')">Creds only</button>
+  </div>
+
+  <div class="spacer"></div>
+  <button class="ctrl-btn" id="pause-btn" onclick="togglePause()">⏸ Pause</button>
+  <button class="ctrl-btn" onclick="clearFeed()">⌫ Clear</button>
+  <button class="ctrl-btn" onclick="exportFeed()">↓ Export</button>
+</div>
+
+<div class="stats-bar" id="stats-bar">
+  <div>Total: <span id="s-total">0</span></div>
+  <div>Critical: <span id="s-crit" style="color:var(--critical)">0</span></div>
+  <div>High: <span id="s-high" style="color:var(--high)">0</span></div>
+  <div>Creds: <span id="s-cred" style="color:#bc8cff">0</span></div>
+  <div>Events/min: <span id="s-epm">0</span></div>
+</div>
+
+<div id="feed-wrap"></div>
+
+<div id="detail-panel">
+  <span id="detail-close" onclick="closeDetail()">✕</span>
+  <div id="detail-content"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let es = null;
+let paused = false;
+let activeFilter = 'ALL';
+let allEvents = [];
+let counters = { total:0, critical:0, high:0, cred:0 };
+let epmBucket = [];
+const MAX_ROWS = 500;
+
+function setFilter(btn, f) {
+  activeFilter = f;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  rebuildFeed();
+}
+
+function togglePause() {
+  paused = !paused;
+  document.getElementById('pause-btn').textContent = paused ? '▶ Resume' : '⏸ Pause';
+}
+
+function clearFeed() {
+  allEvents = [];
+  counters = { total:0, critical:0, high:0, cred:0 };
+  document.getElementById('feed-wrap').innerHTML = '';
+  updateCounters();
+}
+
+function exportFeed() {
+  const blob = new Blob([allEvents.map(e=>JSON.stringify(e)).join('\n')], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `honeypot-live-${Date.now()}.json`;
+  a.click();
+}
+
+function passFilter(e) {
+  if (activeFilter === 'ALL')      return true;
+  if (activeFilter === 'CRITICAL') return e.alert === 'CRITICAL';
+  if (activeFilter === 'HIGH')     return e.alert === 'HIGH' || e.alert === 'CRITICAL';
+  if (activeFilter === 'CRED')     return e.event_type === 'CREDENTIAL_ATTEMPT';
+  return true;
+}
+
+function rebuildFeed() {
+  const wrap = document.getElementById('feed-wrap');
+  wrap.innerHTML = '';
+  allEvents.filter(passFilter).slice(-MAX_ROWS).forEach(e => wrap.appendChild(buildRow(e)));
+  if (!paused) wrap.scrollTop = wrap.scrollHeight;
+}
+
+function buildRow(e) {
+  const row = document.createElement('div');
+  row.className = `feed-row ${e.alert||''}`;
+  row.innerHTML = `
+    <span class="feed-ts">${fmtTime(e.timestamp)}</span>
+    <span class="feed-ip">${e.src_ip||'—'}</span>
+    <span class="feed-type">${badgeType(e.event_type)}</span>
+    <span class="feed-alrt">${badgeAlert(e.alert)}</span>
+    <span class="feed-cve">${badgeCVE(e.cve)}</span>
+    <span class="feed-path" title="${e.path||''}">${e.path||'—'}</span>
+    ${e.username ? `<span class="feed-cred">${e.username} / ${e.password||''}</span>` : ''}
+  `;
+  row.addEventListener('click', () => openDetail(e));
+  return row;
+}
+
+function updateCounters() {
+  document.getElementById('s-total').textContent    = counters.total;
+  document.getElementById('s-crit').textContent     = counters.critical;
+  document.getElementById('s-high').textContent     = counters.high;
+  document.getElementById('s-cred').textContent     = counters.cred;
+}
+
+function openDetail(e) {
+  const panel = document.getElementById('detail-panel');
+  document.getElementById('detail-content').innerHTML = `
+    <h3 style="color:var(--text);font-size:13px;margin-bottom:12px">Event Detail</h3>
+    ${badgeAlert(e.alert)} &nbsp; ${badgeCVE(e.cve)}
+    <div style="margin:10px 0 6px;color:var(--muted);font-size:11px">${fmtTime(e.timestamp)}</div>
+    <pre>${JSON.stringify(e, null, 2)}</pre>
+  `;
+  panel.classList.add('open');
+}
+
+function closeDetail() {
+  document.getElementById('detail-panel').classList.remove('open');
+}
+
+// events/min tracking
+setInterval(() => {
+  const now = Date.now();
+  epmBucket = epmBucket.filter(t => now - t < 60000);
+  document.getElementById('s-epm').textContent = epmBucket.length;
+}, 2000);
+
+function connect() {
+  if (es) es.close();
+  es = new EventSource('/api/stream');
+  const dot = document.getElementById('live-dot');
+  const status = document.getElementById('live-status');
+
+  es.onopen = () => {
+    dot.classList.remove('disconnected');
+    status.textContent = 'LIVE';
+    status.style.color = 'var(--low)';
+  };
+
+  es.onerror = () => {
+    dot.classList.add('disconnected');
+    status.textContent = 'RECONNECTING…';
+    status.style.color = 'var(--critical)';
+    setTimeout(connect, 3000);
+  };
+
+  es.onmessage = (msg) => {
+    let e;
+    try { e = JSON.parse(msg.data); } catch { return; }
+
+    allEvents.push(e);
+    if (allEvents.length > MAX_ROWS * 2) allEvents.splice(0, allEvents.length - MAX_ROWS);
+
+    counters.total++;
+    if (e.alert === 'CRITICAL') counters.critical++;
+    if (e.alert === 'HIGH')     counters.high++;
+    if (e.event_type === 'CREDENTIAL_ATTEMPT') counters.cred++;
+    epmBucket.push(Date.now());
+    updateCounters();
+
+    if (paused) return;
+    if (!passFilter(e)) return;
+
+    const wrap = document.getElementById('feed-wrap');
+    const row  = buildRow(e);
+    wrap.appendChild(row);
+
+    // trim DOM
+    while (wrap.children.length > MAX_ROWS) wrap.removeChild(wrap.firstChild);
+
+    // auto-scroll
+    const atBottom = wrap.scrollTop + wrap.clientHeight >= wrap.scrollHeight - 60;
+    if (atBottom) wrap.scrollTop = wrap.scrollHeight;
+
+    // flash title for critical
+    if (e.alert === 'CRITICAL') {
+      const orig = document.title;
+      let n = 0;
+      const iv = setInterval(() => {
+        document.title = n++ % 2 === 0 ? '🔴 CRITICAL PROBE' : orig;
+        if (n > 6) { clearInterval(iv); document.title = orig; }
+      }, 400);
+    }
+  };
+}
+
+connect();
+</script>
+{% endblock %}

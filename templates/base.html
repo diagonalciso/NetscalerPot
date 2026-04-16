@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}NetScaler Honeypot{% endblock %}</title>
+<style>
+:root {
+  --bg:       #0d1117;
+  --bg2:      #161b22;
+  --bg3:      #21262d;
+  --border:   #30363d;
+  --text:     #c9d1d9;
+  --muted:    #8b949e;
+  --accent:   #58a6ff;
+  --critical: #ff4444;
+  --high:     #e3a008;
+  --low:      #3fb950;
+  --font:     "SF Mono", "Fira Code", "Consolas", monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13px; }
+
+/* Nav */
+nav {
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  height: 50px;
+  gap: 24px;
+  position: sticky; top: 0; z-index: 100;
+}
+.nav-brand {
+  color: var(--critical);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-decoration: none;
+  display: flex; align-items: center; gap: 8px;
+}
+.nav-brand .dot { width: 8px; height: 8px; background: var(--critical); border-radius: 50%; animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+nav a {
+  color: var(--muted);
+  text-decoration: none;
+  padding: 4px 10px;
+  border-radius: 4px;
+  transition: background 0.15s, color 0.15s;
+}
+nav a:hover, nav a.active { background: var(--bg3); color: var(--text); }
+.nav-spacer { flex: 1; }
+.nav-status { font-size: 11px; color: var(--muted); }
+
+/* Layout */
+main { padding: 24px; max-width: 1400px; margin: 0 auto; }
+
+/* Cards */
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 24px; }
+.card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 18px 20px;
+}
+.card .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px; }
+.card .value { font-size: 28px; font-weight: 700; color: var(--text); }
+.card.critical .value { color: var(--critical); }
+.card.high    .value { color: var(--high); }
+.card.accent  .value { color: var(--accent); }
+.card.green   .value { color: var(--low); }
+
+/* Panels */
+.panel {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+.panel-header {
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.panel-body { padding: 16px 18px; }
+
+/* Table */
+.tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
+.tbl th { color: var(--muted); font-weight: 600; padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.tbl td { padding: 7px 10px; border-bottom: 1px solid #21262d; vertical-align: middle; word-break: break-all; }
+.tbl tr:last-child td { border-bottom: none; }
+.tbl tr:hover td { background: var(--bg3); }
+
+/* Badges */
+.badge {
+  display: inline-block; padding: 2px 7px; border-radius: 3px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.5px; white-space: nowrap;
+}
+.badge-critical { background: rgba(255,68,68,0.18); color: var(--critical); border: 1px solid rgba(255,68,68,0.3); }
+.badge-high     { background: rgba(227,160,8,0.15); color: var(--high);     border: 1px solid rgba(227,160,8,0.3); }
+.badge-low      { background: rgba(63,185,80,0.12); color: var(--low);      border: 1px solid rgba(63,185,80,0.3); }
+.badge-none     { background: var(--bg3); color: var(--muted); border: 1px solid var(--border); }
+.badge-cve      { background: rgba(88,166,255,0.12); color: var(--accent);  border: 1px solid rgba(88,166,255,0.3); }
+.badge-type     { background: var(--bg3); color: var(--text); border: 1px solid var(--border); }
+
+/* Misc */
+.mono { font-family: var(--font); }
+.muted { color: var(--muted); }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+@media (max-width: 800px) { .grid2 { grid-template-columns: 1fr; } }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+{% block head %}{% endblock %}
+</head>
+<body>
+<nav>
+  <a class="nav-brand" href="/"><span class="dot"></span>NETSCALER&nbsp;HONEYPOT</a>
+  <a href="/" id="nav-dashboard">Dashboard</a>
+  <a href="/events" id="nav-events">Events</a>
+  <a href="/live" id="nav-live">Live Feed</a>
+  <a href="/unique-ips" id="nav-unique-ips">Unique IPs</a>
+  <span class="nav-spacer"></span>
+  <span class="nav-status" id="nav-clock"></span>
+</nav>
+<main>
+{% block content %}{% endblock %}
+</main>
+<script>
+// highlight active nav link
+const path = location.pathname;
+document.querySelectorAll('nav a[id]').forEach(a => {
+  const href = a.getAttribute('href');
+  if (href === path || (path === '/' && href === '/')) a.classList.add('active');
+});
+// clock
+function tick() {
+  document.getElementById('nav-clock').textContent = new Date().toUTCString().replace(' GMT','Z');
+}
+tick(); setInterval(tick, 1000);
+
+// shared helpers
+function badgeAlert(level) {
+  const cls = { CRITICAL:'badge-critical', HIGH:'badge-high', LOW:'badge-low' }[level] || 'badge-none';
+  return `<span class="badge ${cls}">${level||'—'}</span>`;
+}
+function badgeCVE(cve) {
+  if (!cve) return '<span class="muted">—</span>';
+  return `<span class="badge badge-cve">${cve}</span>`;
+}
+function badgeType(t) {
+  return `<span class="badge badge-type">${t}</span>`;
+}
+function fmtTime(ts) {
+  if (!ts) return '—';
+  return ts.replace('T',' ').replace(/\.\d+/,'').replace('+00:00','Z');
+}
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

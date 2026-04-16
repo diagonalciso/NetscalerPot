@@ -1,0 +1,17 @@
+[Unit]
+Description=NetScaler Honeypot Log Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=openclaw
+WorkingDirectory=/home/openclaw/claude/netscaler-honeypot
+ExecStart=/usr/bin/python3 /home/openclaw/claude/netscaler-honeypot/logserver.py --port 8084
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=netscaler-logserver
+
+[Install]
+WantedBy=multi-user.target

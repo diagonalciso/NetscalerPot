@@ -1,0 +1,17 @@
+[Unit]
+Description=Citrix NetScaler Honeypot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/openclaw/claude/netscaler-honeypot
+ExecStart=/usr/bin/python3 /home/openclaw/claude/netscaler-honeypot/honeypot.py --port 443
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=netscaler-honeypot
+
+[Install]
+WantedBy=multi-user.target

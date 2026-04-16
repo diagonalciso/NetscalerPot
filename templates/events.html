@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+{% block title %}Events — NetScaler Honeypot{% endblock %}
+
+{% block head %}
+<style>
+.filters {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  margin-bottom: 16px;
+}
+.filters select, .filters input {
+  background: var(--bg2); border: 1px solid var(--border);
+  color: var(--text); padding: 6px 10px; border-radius: 4px;
+  font: inherit; font-size: 12px; outline: none;
+}
+.filters select:focus, .filters input:focus { border-color: var(--accent); }
+.filters input[type=text] { min-width: 200px; }
+.btn {
+  padding: 6px 14px; border-radius: 4px; border: 1px solid var(--border);
+  background: var(--bg3); color: var(--text); cursor: pointer;
+  font: inherit; font-size: 12px;
+}
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+.btn-primary { background: var(--accent); color: #000; border-color: var(--accent); }
+.btn-primary:hover { background: #79c0ff; color: #000; border-color: #79c0ff; }
+
+.pagination {
+  display: flex; gap: 8px; align-items: center; justify-content: center;
+  padding: 14px 0 0;
+}
+.page-btn {
+  padding: 4px 10px; border-radius: 3px; border: 1px solid var(--border);
+  background: var(--bg3); color: var(--text); cursor: pointer;
+  font: inherit; font-size: 12px;
+}
+.page-btn:hover { border-color: var(--accent); }
+.page-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
+.page-btn:disabled { opacity: 0.4; cursor: default; }
+
+.count-label { color: var(--muted); font-size: 11px; }
+
+/* Expandable row */
+.detail-row td {
+  background: var(--bg3);
+  padding: 12px 16px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.detail-json { white-space: pre-wrap; word-break: break-all; }
+tr.clickable { cursor: pointer; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel-header">
+    Event Log
+    <span class="count-label" id="count-label"></span>
+  </div>
+  <div class="panel-body">
+    <div class="filters">
+      <input type="text" id="f-search" placeholder="Search all fields…">
+      <select id="f-type">
+        <option value="">All types</option>
+        <option>CREDENTIAL_ATTEMPT</option>
+        <option>EXPLOIT_PROBE</option>
+        <option>LOGIN_PAGE_VIEW</option>
+        <option>RECON</option>
+      </select>
+      <select id="f-alert">
+        <option value="">All alerts</option>
+        <option>CRITICAL</option>
+        <option>HIGH</option>
+        <option>LOW</option>
+      </select>
+      <select id="f-cve">
+        <option value="">All CVEs</option>
+        <option>CVE-2023-3519</option>
+        <option>CVE-2023-4966</option>
+        <option>CVE-2022-27518</option>
+        <option>CVE-2022-27510</option>
+      </select>
+      <input type="text" id="f-ip" placeholder="Filter by IP…" style="min-width:130px">
+      <button class="btn btn-primary" onclick="doFilter()">Apply</button>
+      <button class="btn" onclick="clearFilters()">Clear</button>
+    </div>
+
+    <div style="overflow-x:auto">
+      <table class="tbl" id="events-table">
+        <thead><tr>
+          <th>#</th>
+          <th>Time (UTC)</th>
+          <th>IP</th>
+          <th>Method</th>
+          <th>Type</th>
+          <th>Alert</th>
+          <th>CVE</th>
+          <th>Path</th>
+          <th>Username</th>
+          <th>Password</th>
+        </tr></thead>
+        <tbody id="events-body"></tbody>
+      </table>
+    </div>
+
+    <div class="pagination" id="pagination"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentPage = 1;
+const PER = 50;
+
+function getFilters() {
+  return {
+    q:     document.getElementById('f-search').value.trim(),
+    type:  document.getElementById('f-type').value,
+    alert: document.getElementById('f-alert').value,
+    cve:   document.getElementById('f-cve').value,
+    ip:    document.getElementById('f-ip').value.trim(),
+  };
+}
+
+function clearFilters() {
+  ['f-search','f-ip'].forEach(id => document.getElementById(id).value = '');
+  ['f-type','f-alert','f-cve'].forEach(id => document.getElementById(id).value = '');
+  currentPage = 1;
+  load();
+}
+
+function doFilter() { currentPage = 1; load(); }
+
+async function load() {
+  const f = getFilters();
+  const params = new URLSearchParams({ page: currentPage, per: PER, ...f });
+  // strip empty
+  [...params.keys()].forEach(k => { if (!params.get(k)) params.delete(k); });
+
+  const resp = await fetch('/api/events?' + params);
+  const data = await resp.json();
+
+  document.getElementById('count-label').textContent =
+    `${data.total.toLocaleString()} event${data.total !== 1 ? 's' : ''}`;
+
+  const tbody = document.getElementById('events-body');
+  tbody.innerHTML = '';
+
+  (data.events || []).forEach((e, i) => {
+    const rowNum = (currentPage - 1) * PER + i + 1;
+    const tr = document.createElement('tr');
+    tr.className = 'clickable';
+    tr.innerHTML = `
+      <td class="muted">${rowNum}</td>
+      <td class="muted" style="white-space:nowrap">${fmtTime(e.timestamp)}</td>
+      <td>${e.src_ip||'—'}</td>
+      <td class="muted">${e.method||'—'}</td>
+      <td>${badgeType(e.event_type)}</td>
+      <td>${badgeAlert(e.alert)}</td>
+      <td>${badgeCVE(e.cve)}</td>
+      <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${e.path||''}">${e.path||'—'}</td>
+      <td>${e.username ? `<b style="color:var(--high)">${e.username}</b>` : '<span class="muted">—</span>'}</td>
+      <td>${e.password ? `<span style="color:var(--critical)">${e.password}</span>` : '<span class="muted">—</span>'}</td>
+    `;
+    // expand on click
+    tr.addEventListener('click', () => {
+      const existing = tbody.querySelector('.detail-row[data-for="'+i+'"]');
+      if (existing) { existing.remove(); return; }
+      const detail = document.createElement('tr');
+      detail.className = 'detail-row';
+      detail.dataset.for = i;
+      detail.innerHTML = `<td colspan="10"><div class="detail-json">${JSON.stringify(e, null, 2)}</div></td>`;
+      tr.after(detail);
+    });
+    tbody.appendChild(tr);
+  });
+
+  renderPagination(data.page, data.pages);
+}
+
+function renderPagination(page, pages) {
+  const div = document.getElementById('pagination');
+  div.innerHTML = '';
+  if (pages <= 1) return;
+
+  const add = (label, p, active, disabled) => {
+    const btn = document.createElement('button');
+    btn.className = 'page-btn' + (active ? ' active' : '');
+    btn.textContent = label;
+    btn.disabled = disabled;
+    if (!disabled) btn.onclick = () => { currentPage = p; load(); };
+    div.appendChild(btn);
+  };
+
+  add('«', 1, false, page === 1);
+  add('‹', page - 1, false, page === 1);
+
+  // window of pages
+  const lo = Math.max(1, page - 2), hi = Math.min(pages, page + 2);
+  if (lo > 1) { add('1', 1, false, false); if (lo > 2) div.insertAdjacentHTML('beforeend','<span class="muted">…</span>'); }
+  for (let p = lo; p <= hi; p++) add(p, p, p === page, false);
+  if (hi < pages) { div.insertAdjacentHTML('beforeend','<span class="muted">…</span>'); add(pages, pages, false, false); }
+
+  add('›', page + 1, false, page === pages);
+  add('»', pages, false, page === pages);
+
+  div.insertAdjacentHTML('beforeend',
+    `<span class="count-label">&nbsp;Page ${page} of ${pages}</span>`);
+}
+
+// enter key on search / ip
+['f-search','f-ip'].forEach(id => {
+  document.getElementById(id).addEventListener('keydown', e => { if (e.key === 'Enter') doFilter(); });
+});
+
+load();
+</script>
+{% endblock %}

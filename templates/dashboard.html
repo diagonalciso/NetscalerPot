@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — NetScaler Honeypot{% endblock %}
+
+{% block head %}
+<style>
+/* Activity chart */
+#activity-chart { width: 100%; height: 80px; display: block; }
+
+/* Top lists */
+.rank-list { list-style: none; }
+.rank-list li {
+  display: flex; align-items: center; gap: 10px;
+  padding: 5px 0; border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.rank-list li:last-child { border-bottom: none; }
+.rank-bar-wrap { flex: 1; background: var(--bg3); border-radius: 2px; height: 6px; overflow: hidden; }
+.rank-bar { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.4s; }
+.rank-count { color: var(--muted); min-width: 30px; text-align: right; }
+.rank-label { min-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Cred table scrollable */
+.cred-scroll { max-height: 280px; overflow-y: auto; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="cards" id="stat-cards">
+  <div class="card"><div class="label">Total Events</div><div class="value" id="c-total">—</div></div>
+  <div class="card critical"><div class="label">Critical Probes</div><div class="value" id="c-critical">—</div></div>
+  <div class="card high"><div class="label">High Alerts</div><div class="value" id="c-high">—</div></div>
+  <div class="card accent"><div class="label">Cred Attempts</div><div class="value" id="c-creds">—</div></div>
+  <div class="card green"><div class="label">Unique IPs</div><div class="value" id="c-ips">—</div></div>
+</div>
+
+<div class="panel">
+  <div class="panel-header">
+    Activity — Last 60 Minutes
+    <span class="muted" style="font-weight:400;font-size:11px" id="chart-subtitle"></span>
+  </div>
+  <div class="panel-body" style="padding:12px 18px 10px">
+    <canvas id="activity-chart"></canvas>
+  </div>
+</div>
+
+<div class="grid2">
+  <!-- Top IPs -->
+  <div class="panel">
+    <div class="panel-header">Top Source IPs</div>
+    <div class="panel-body">
+      <ul class="rank-list" id="top-ips"></ul>
+    </div>
+  </div>
+
+  <!-- CVE breakdown -->
+  <div class="panel">
+    <div class="panel-header">CVE Probes</div>
+    <div class="panel-body">
+      <ul class="rank-list" id="cve-list"></ul>
+    </div>
+  </div>
+</div>
+
+<div class="grid2">
+  <!-- Event types -->
+  <div class="panel">
+    <div class="panel-header">Event Types</div>
+    <div class="panel-body">
+      <ul class="rank-list" id="type-list"></ul>
+    </div>
+  </div>
+
+  <!-- Unique usernames -->
+  <div class="panel">
+    <div class="panel-header">Usernames Attempted</div>
+    <div class="panel-body">
+      <div id="user-list" class="cred-scroll"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Recent events -->
+<div class="panel">
+  <div class="panel-header">
+    Recent Events
+    <a href="/events" style="color:var(--accent);text-decoration:none;font-size:11px;font-weight:400">View all →</a>
+  </div>
+  <div style="overflow-x:auto">
+    <table class="tbl">
+      <thead><tr>
+        <th>Time</th><th>IP</th><th>Type</th><th>Alert</th><th>CVE</th><th>Path</th><th>User / Pass</th>
+      </tr></thead>
+      <tbody id="recent-body"></tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const REFRESH_MS = 15000;
+
+function renderRankList(ulId, obj, color) {
+  const ul = document.getElementById(ulId);
+  if (!obj || !Object.keys(obj).length) { ul.innerHTML = '<li class="muted">No data</li>'; return; }
+  const max = Math.max(...Object.values(obj));
+  ul.innerHTML = Object.entries(obj).map(([k,v]) => `
+    <li>
+      <span class="rank-label">${k||'(none)'}</span>
+      <div class="rank-bar-wrap"><div class="rank-bar" style="width:${Math.round(v/max*100)}%;background:${color||'var(--accent)'}"></div></div>
+      <span class="rank-count">${v}</span>
+    </li>`).join('');
+}
+
+function drawChart(buckets) {
+  const canvas = document.getElementById('activity-chart');
+  const W = canvas.offsetWidth, H = 80;
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0,0,W,H);
+  const max = Math.max(...buckets, 1);
+  const bw = W / buckets.length;
+
+  // grid lines
+  ctx.strokeStyle = '#21262d'; ctx.lineWidth = 1;
+  [0.25,0.5,0.75,1].forEach(f => {
+    const y = H - f*H + 0.5;
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke();
+  });
+
+  // bars
+  buckets.forEach((v, i) => {
+    const bh = (v / max) * (H - 4);
+    const x = i * bw + 1, y = H - bh;
+    const grad = ctx.createLinearGradient(0,y,0,H);
+    grad.addColorStop(0,'rgba(88,166,255,0.85)');
+    grad.addColorStop(1,'rgba(88,166,255,0.25)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(x, y, bw - 2, bh);
+  });
+
+  // subtitle
+  const total = buckets.reduce((a,b)=>a+b,0);
+  document.getElementById('chart-subtitle').textContent = `${total} events in window`;
+}
+
+function renderRecent(events) {
+  const tbody = document.getElementById('recent-body');
+  tbody.innerHTML = events.slice(0,20).map(e => `
+    <tr>
+      <td class="muted">${fmtTime(e.timestamp)}</td>
+      <td>${e.src_ip||'—'}</td>
+      <td>${badgeType(e.event_type)}</td>
+      <td>${badgeAlert(e.alert)}</td>
+      <td>${badgeCVE(e.cve)}</td>
+      <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${e.path||''}">${e.path||'—'}</td>
+      <td>${e.username ? `<b>${e.username}</b> / ${e.password||''}` : '<span class="muted">—</span>'}</td>
+    </tr>`).join('');
+}
+
+async function refresh() {
+  const [statsResp, eventsResp] = await Promise.all([
+    fetch('/api/stats'),
+    fetch('/api/events?per=20'),
+  ]);
+  const stats  = await statsResp.json();
+  const evdata = await eventsResp.json();
+
+  document.getElementById('c-total').textContent    = stats.total;
+  document.getElementById('c-critical').textContent = stats.by_alert?.CRITICAL || 0;
+  document.getElementById('c-high').textContent     = stats.by_alert?.HIGH     || 0;
+  document.getElementById('c-creds').textContent    = stats.cred_count;
+  document.getElementById('c-ips').textContent      = Object.keys(stats.top_ips||{}).length;
+
+  drawChart(stats.activity || new Array(60).fill(0));
+  renderRankList('top-ips',  stats.top_ips,  'var(--accent)');
+  renderRankList('cve-list', stats.by_cve,   'var(--critical)');
+  renderRankList('type-list',stats.by_type,  'var(--high)');
+
+  const users = stats.unique_users || [];
+  const udiv  = document.getElementById('user-list');
+  udiv.innerHTML = users.length
+    ? users.map(u=>`<div style="padding:4px 0;border-bottom:1px solid var(--border)">${u}</div>`).join('')
+    : '<span class="muted">No credentials captured yet</span>';
+
+  renderRecent(evdata.events || []);
+}
+
+refresh();
+setInterval(refresh, REFRESH_MS);
+window.addEventListener('resize', () => {
+  fetch('/api/stats').then(r=>r.json()).then(s => drawChart(s.activity || new Array(60).fill(0)));
+});
+</script>
+{% endblock %}

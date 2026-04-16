@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.pyo
+certs/server.key
+logs/
+*.log
+.env

@@ -59,6 +59,10 @@ def parse_log_line(raw: str):
         return None
 
 
+def _is_local(ip):
+    return not ip or ip.startswith(('127.', '192.'))
+
+
 def load_events():
     events = []
     if not os.path.exists(LOG_FILE):
@@ -66,7 +70,7 @@ def load_events():
     with open(LOG_FILE, errors="replace") as f:
         for line in f:
             e = parse_log_line(line)
-            if e:
+            if e and not _is_local(e.get('src_ip', '')):
                 events.append(e)
     return events
 
@@ -109,6 +113,15 @@ def compute_stats(events):
 @app.route("/")
 def dashboard():
     return render_template("dashboard.html")
+
+
+@app.route("/api/docs/user-manual")
+def user_manual():
+    manual_path = os.path.join(os.path.dirname(__file__), "HONEYPOT_MANUAL.html")
+    if os.path.exists(manual_path):
+        with open(manual_path, "r") as f:
+            return f.read()
+    return "Manual not found", 404
 
 
 @app.route("/live")

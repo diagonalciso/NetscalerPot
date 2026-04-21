@@ -37,11 +37,14 @@ logger.addHandler(stdout_handler)
 
 def log_event(event_type: str, extra: dict = None):
     """Emit a structured JSON log entry."""
+    src_ip = request.headers.get("X-Forwarded-For", request.remote_addr)
+    if src_ip.startswith(('127.', '192.')):
+        return
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "event_id": str(uuid.uuid4()),
         "event_type": event_type,
-        "src_ip": request.headers.get("X-Forwarded-For", request.remote_addr),
+        "src_ip": src_ip,
         "src_port": request.environ.get("REMOTE_PORT", ""),
         "method": request.method,
         "path": request.full_path.rstrip("?"),
@@ -511,6 +514,17 @@ def get_auth_methods():
     )
     resp.headers["Content-Type"] = "text/xml"
     return ns_response(resp)
+
+
+# ── Help / Documentation ──────────────────────────────────────────────────────
+
+@app.route("/api/docs/user-manual")
+def user_manual():
+    manual_path = os.path.join(os.path.dirname(__file__), "HONEYPOT_MANUAL.html")
+    if os.path.exists(manual_path):
+        with open(manual_path, "r") as f:
+            return f.read()
+    return "Manual not found", 404
 
 
 # ── Catch-all ─────────────────────────────────────────────────────────────────
